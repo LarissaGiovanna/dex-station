@@ -17,18 +17,20 @@ Samsung Galaxy (One UI 8 / Android 16)  ──cabo USB──►  Eee PC 1015BX
 |---|---|
 | Modelo | Asus Eee PC 1015BX |
 | Processador | AMD C-60 — 2 núcleos, 1,0 GHz (turbo até 1,33 GHz), x86-64 (64 bits) |
-| Vídeo | APU AMD Radeon HD 6290 (integrada, sem memória dedicada) |
-| Memória RAM | 2 GB DDR3 (parte é reservada para o vídeo; sobram ~1,7 GB para o sistema) |
+| Vídeo | APU AMD Radeon HD 6290 (Wrestler, driver `radeon`, sem memória dedicada) |
+| Memória RAM | 2 GB DDR3 — **1,5 GiB visíveis**, o resto é reserva de vídeo da APU |
 | Tela | 10,1", 1024×600 (proporção 5:3), painel fosco |
-| Disco | HDD de 5400 rpm (250 GB ou 320 GB, conforme o lote) |
-| Portas | 2× USB 2.0, **HDMI** e **VGA** (ambas somente saída), Ethernet 10/100, leitor de cartão SD, P2 de áudio (fone/microfone) |
-| Firmware | BIOS legado (sem UEFI) — o boot é feito por MBR/GRUB `i386-pc` |
+| Disco | Seagate ST9320325AS, 320 GB, 5400 rpm |
+| Portas | 3× USB 2.0, **HDMI** e **VGA** (ambas somente saída), Ethernet 10/100, leitor de cartão SD, P2 de áudio (fone/microfone) |
+| Rede | Ethernet + Wi-Fi Atheros AR9285 (`ath9k`, **sem firmware proprietário**) |
+| Firmware | **UEFI** (GPT + ESP), com CSM legado disponível — boot por USB com **Esc**, setup com **F2** |
+| Bateria | 6 células, hoje com **55% da capacidade** (2.069 de 3.766 mWh) |
 | Teclado | ABNT2 nos modelos vendidos no Brasil |
 
 Consequências práticas desse hardware:
 
-- **2 GB de RAM é o piso, não a folga.** O sistema é montado para caber num orçamento de
-  ~400 MB em repouso.
+- **1,5 GiB é o piso, não a folga.** O sistema é montado para caber num orçamento de
+  ~450–500 MB em repouso.
 - **Não existe entrada de vídeo.** O 1015BX tem HDMI e VGA, mas as duas são **saídas**:
   servem para mandar a imagem do netbook para um monitor/TV, não para receber a imagem do
   celular. Por isso o caminho de vídeo é USB (veja [`PLAN.md`](PLAN.md) §3).
@@ -38,13 +40,33 @@ Consequências práticas desse hardware:
   uma TV/monitor maior. A resolução do DeX continua 1024×600 — a imagem é ampliada, não
   ganha detalhe.
 - **O P2 de áudio é a saída natural para som**, caso o áudio seja ligado (padrão é desligado).
+- **Bateria degradada:** com 55% da capacidade, o hub alimentado deixa de ser opcional.
+
+## Estado atual da máquina (medido em 21/10/2026)
+
+| Item | Valor |
+|---|---|
+| Distribuição | **Void Linux**, kernel 6.18.56_1, x86_64 |
+| Init | **runit** (não é systemd) |
+| Pacotes | `xbps`; `ffmpeg` e Python 3.14 presentes; **`adb` e `scrcpy` ainda não instalados** |
+| Memória | 1,5 GiB total, ~1,1 GiB disponível, 470 MiB em uso |
+| Swap | 7,8 GB em partição do HDD, **sem zram** |
+| Boot | UEFI com ESP de 256 MB em `/boot/efi` |
+
+O inventário completo (com as saídas de `lscpu`, `free`, `lsusb`, `lsblk`, `lspci`…) está em
+[`docs/ambiente-de-testes.md`](docs/ambiente-de-testes.md). Ele é gerado por
+`scripts/coleta-ambiente.sh` — use `--mascarar` antes de publicar.
+
+Consequência direta: o **M1 roda em Void/runit**, então os comandos da fase de bancada são
+`xbps-install` + `sv`, enquanto a imagem final (M3 em diante) usa Debian/systemd. O plano
+mantém os dois caminhos separados (ver [`PLAN.md`](PLAN.md) §9.1.1).
 
 ## Status
 
 | Fase | Conteúdo | Estado |
 |---|---|---|
 | M0 | Plano de desenvolvimento | ✅ [`PLAN.md`](PLAN.md) |
-| M1 | Daemon do kiosk rodando na distro atual do netbook | ⬜ |
+| M1 | Daemon do kiosk rodando no Void/runit atual do netbook | ⬜ |
 | M2 | Validação no aparelho real (DeX + teclado/trackpad) | ⬜ |
 | M3 | Build da imagem (`dex-station.img`) | ⬜ |
 | M4 | Live USB | ⬜ |
@@ -55,8 +77,9 @@ Consequências práticas desse hardware:
 ## Por onde começar
 
 1. Ler [`PLAN.md`](PLAN.md) — arquitetura, riscos, matriz de testes e roadmap.
-2. **M1**: implementar `runtime/dex-station-session` e rodar **na distribuição que já está
-   instalada no netbook**. O ciclo de teste cai de horas (build de imagem) para minutos.
+2. **M1**: implementar `runtime/dex-station-session` e rodar **no Void Linux que já está
+   instalado no netbook** (`xbps-install -S android-tools scrcpy`, serviço em `/etc/sv`).
+   O ciclo de teste cai de horas (build de imagem) para minutos.
 3. **M2**: repetir com o celular conectado de verdade.
 
 ## Variantes de entrega
@@ -65,8 +88,9 @@ As duas variantes usam **a mesma** `dex-station.img`. Muda só o destino da grav
 
 - **Live USB** — `scripts/make-live-usb.sh`: grava a imagem num pendrive. O HD do netbook
   não é tocado, nada é instalado. É o modo recomendado para testar.
-- **Instalação no HD** — `scripts/install-on-disk.sh`: faz backup, grava a imagem no disco
-  interno e instala o GRUB. Sistema dedicado e permanente.
+- **Instalação no HD** — `scripts/install-on-disk.sh`: faz backup (incluindo a ESP atual),
+  grava a imagem em **GPT com ESP** e instala o GRUB UEFI (`--removable`). Sistema dedicado
+  e permanente.
 
 Detalhes de cada procedimento em [`PLAN.md`](PLAN.md) §7 e §8.
 
@@ -83,7 +107,8 @@ Detalhes de cada procedimento em [`PLAN.md`](PLAN.md) §7 e §8.
 
 A porta USB 2.0 do 1015BX oferece **~500 mA**. Um Galaxy em uso com DeX consome mais do que
 isso, então **a bateria do netbook vai ser drenada** e o celular pode até descarregar
-devagar. Soluções, em ordem de preferência:
+devagar. A bateria deste netbook já está com **55% da capacidade original**, o que encurta
+ainda mais a autonomia. Soluções, em ordem de preferência:
 
 1. **Hub USB alimentado** (com fonte própria) — o netbook só transporta dados.
 2. Carregador ligado direto no celular + cabo de dados para o netbook.
@@ -93,5 +118,7 @@ devagar. Soluções, em ordem de preferência:
 
 - Sem aceleração de vídeo no scrcpy: a decodificação é feita pela CPU (a APU tem decoder
   UVD3, mas o scrcpy não o utiliza). Por isso o teto de 15 fps.
-- Sem áudio por padrão é a escolha mais segura para 2 GB de RAM (decisão em aberto no plano).
+- Sem áudio por padrão é a escolha mais segura para 1,5 GiB de RAM (decisão em aberto no plano).
 - O pendrive do modo Live **não guarda nada** entre boots — é descartável por projeto.
+- O estado atual usa **swap em disco e nenhum zram**, o oposto do que a imagem vai entregar:
+  comparações de desempenho entre bancada e imagem precisam registrar essa diferença.

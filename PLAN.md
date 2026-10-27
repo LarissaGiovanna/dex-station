@@ -1,12 +1,19 @@
 # DeX Station OS — Plano de Desenvolvimento
 
 **Alvo:** Asus Eee PC 1015BX — AMD C-60 (2 núcleos, 1,0 GHz, turbo 1,33 GHz, x86-64), APU
-Radeon HD 6290, 2 GB DDR3, tela 10,1" 1024×600, HDD 5400 rpm, BIOS legado (sem UEFI),
+Radeon HD 6290, 2 GB DDR3 (**1,5 GiB visíveis**, após a reserva de vídeo), tela 10,1" 1024×600,
+HDD 5400 rpm, **UEFI confirmado em bancada** (GPT + ESP, com CSM legado disponível),
 3× USB 2.0, HDMI e VGA (ambas saída), P2 de áudio (fone/microfone).
 **Fonte:** Samsung Galaxy com One UI 8 / Android 16.
 **Objetivo:** transformar o netbook numa estação DeX dedicada — o celular faz o processamento,
 o netbook é apenas monitor + teclado + trackpad.
 
+> **Revisão 4 (27/10/2026):** dados medidos na bancada (ver §4.4) incorporados ao plano:
+> **UEFI/GPT** em vez de BIOS legado/MBR, **Void Linux + runit** como sistema atual,
+> **1,5 GiB** de RAM útil, **sem zram e com 7,8 GB de swap no HDD**, Wi-Fi **Atheros AR9285**
+> (sem firmware proprietário) e bateria com **55% da capacidade**. Parte do §8, §9 e §12 mudou
+> por causa disso.
+>
 > **Revisão 3 (24/10/2026):** portas do 1015BX corrigidas — ele **tem HDMI e VGA** (ambas
 > somente saída) e **P2 de áudio**; §3 e §4.1 reescritos para explicar por que isso não muda
 > a decisão pelo USB (as portas não recebem vídeo).
@@ -71,14 +78,16 @@ A diferença entre as variantes é **o alvo da gravação**, não o conteúdo da
 | # | Decisão | Justificativa |
 |---|---|---|
 | D1 | Conexão por **USB** (adb + scrcpy), não por vídeo | Um único cabo leva imagem, entrada e energia; dispensa placa de captura e dongle Bluetooth |
-| D2 | Base **Debian 13 (trixie) minimal** + **LXQt** | Baixo consumo de RAM/CPU; LXQt é leve em X11 e tem autologin simples |
+| D2 | Imagem em **Debian 13 (trixie) minimal** + **LXQt**; M1 roda no **Void Linux + runit** já instalado | Baixo consumo de RAM/CPU; LXQt é leve em X11. Separar "distro atual" (Void) de "imagem final" (Debian) evita misturar as duas stacks de init |
 | D3 | **scrcpy ≥ 3.0** | Primeira versão com `--new-display` (display virtual), requisito do DeX no One UI 8 |
 | D4 | Display virtual **1024×600 @ 160 DPI** | Casa 1:1 com o painel → nada é reescalonado → menos CPU para rasterizar |
 | D5 | Sessão em **kiosk** (autologin + daemon), sem gerenciador de janelas visível | O usuário só interage com o DeX, nunca com o SO |
 | D6 | Mesma imagem para USB e HD | Uma coisa só para manter; muda apenas o destino da gravação |
 | D7 | Detecção por **consulta ao adb a cada 2 s** (v1) | Funciona em qualquer estado do udev e custa quase nada. udev fica como otimização (v2) |
 | D8 | Limpeza por **cadeia de fallback em 3 níveis** | O netbook nunca fica sem imagem, mesmo se o display virtual falhar |
-| D9 | Kernel e userland **amd64** (64 bits) | O C-60 é x86-64; o BIOS legado só afeta o boot (GRUB `i386-pc`), não o kernel |
+| D9 | Kernel e userland **amd64** (64 bits) | O C-60 é x86-64. Com UEFI, o boot é `grub-efi-amd64` (`x86_64-efi`); o alvo `i386-pc` fica só como plano B via CSM |
+| D10 | Build da imagem **no PC de bancada (Linux Mint, x86_64)**, não no netbook | O netbook roda Void, tem 1,5 GiB de RAM e HDD de 5400 rpm — debootstrap + chroot ali seria lento e arriscado |
+| D11 | O daemon **não depende de systemd** | Precisa rodar tanto no Void/runit (M1) quanto no Debian/systemd (imagem). Unit files são cascas finas em volta do mesmo script |
 
 ---
 
@@ -117,18 +126,19 @@ que roda em display virtual.
 
 | Item | Especificação do 1015BX | Observação |
 |---|---|---|
-| CPU | AMD C-60, 2 núcleos, 1,0 GHz (turbo 1,33 GHz), 9 W | Sem AVX; 64 bits; desempenho próximo de um Atom de mesma época |
-| GPU | Radeon HD 6290 (integrada, até 384 MB da RAM compartilhada) | Driver `radeon`/Mesa; **não** é Intel (nada de `i915`/GMA) |
-| RAM | 2 GB DDR3, canal único, 1 slot | ~1,7 GB utilizáveis após a reserva de vídeo. Oficialmente 2 GB máx.; há relatos de 4 GB funcionando |
-| Tela | 10,1" 1024×600, fosca | Alvo do display virtual; sem escalonamento |
-| Disco | HDD 5400 rpm, 250/320 GB | Lento: usar zram, evitar swap em disco, desligar serviços que escrevem muito |
-| USB | 2 portas USB 2.0 | ~500 mA por porta — o celular vai drenar a bateria |
+| CPU | AMD C-60, 2 núcleos, 1,0 GHz (turbo 1,33 GHz), 9 W | Sem AVX; 64 bits; medido: família 20, modelo 2, AMD-V |
+| GPU | Radeon HD 6290 (Wrestler, `1002:9807`), integrada | Driver em uso medido: **`radeon`**; `amdgpu` também carrega no kernel 6.18, mas não assume o chip. **Não** é Intel (nada de `i915`/GMA) |
+| RAM | 2 GB DDR3, canal único, 1 slot | **Medido: `MemTotal` = 1.612.116 kB ≈ 1,5 GiB** (o restante é reserva de vídeo da APU). Em repouso: 470 MiB usados, 1,1 GiB disponíveis |
+| Tela | 10,1" 1024×600, fosca | Alvo do display virtual; sem escalonamento. Confirmar com `xrandr` dentro da sessão gráfica |
+| Disco | **Seagate ST9320325AS**, 320 GB, 5400 rpm | Medido: `sda1` 256M ESP (vfat), `sda2` 290G ext4 (`/`), `sda3` 7,8G swap. Lento: preferir zram |
+| USB | **3 portas** USB 2.0 (controladores EHCI/OHCI SB7x0) | ~500 mA por porta — o celular vai drenar a bateria. Sem USB 3.0 |
 | Saída de vídeo | **HDMI** e **VGA (D-Sub)** — ambas só de saída | Permitem espelhar/estender a sessão numa TV ou monitor; **não** recebem sinal |
 | Áudio | P2 (fone/microfone) + alto-falantes internos + microfone | Saída de fone útil se o áudio do scrcpy for ligado |
-| Rede | Ethernet 10/100 + Wi-Fi 802.11 b/g/n (Broadcom na maioria dos lotes) | Wi-Fi exige `firmware-brcm80211` |
-| Bluetooth | 3.0 em algumas unidades | **Não necessário** — toda a entrada vai por USB |
-| Firmware | BIOS legado, sem UEFI | Boot por USB com **Esc** no POST; setup com **F2** |
-| Câmera | 0,3 MP | Não usada |
+| Rede | Ethernet 10/100 + Wi-Fi **Atheros AR9285** (`168c:002b`, driver `ath9k`) | **Não precisa de firmware proprietário** — cai por terra a exigência de `firmware-brcm80211` |
+| Bluetooth | 3.0 em algumas unidades (`btusb` detectado) | **Não necessário** — toda a entrada vai por USB |
+| Bateria | 6 células; **medido: 2.069 mWh de 3.766 mWh (55% da capacidade)** | Autonomia curta: o teste de energia (T12) tem de considerar bateria degradada |
+| Firmware | **UEFI confirmado** (efivarfs montado, ESP em `/boot/efi`), com CSM/legado disponível | Boot por USB com **Esc** no POST; setup com **F2**. O plano de partição é GPT + ESP (§8) |
+| Câmera | 0,3 MP (`13d3:5711`, uvcvideo) | Não usada |
 
 ### 4.2 Software (lado celular)
 
@@ -145,12 +155,27 @@ que roda em display virtual.
 |---|---|---|
 | Debian trixie | 13.x | `debootstrap` (componentes `main`, `contrib`, `non-free-firmware`) |
 | Kernel | `linux-image-amd64` (genérico) | Debian — não usar subkernel `686`/`atom` (descontinuado no Debian 12+) |
-| Firmware | `firmware-amd-graphics` (GPU), `firmware-brcm80211` (Wi-Fi) | Debian `non-free-firmware` |
+| Firmware | `firmware-amd-graphics` (GPU `radeon`) | Debian `non-free-firmware`. **Wi-Fi não precisa**: a unidade de bancada é Atheros AR9285 (`ath9k`) |
 | scrcpy | 3.x (tar oficial) | GitHub Releases, com SHA-256 conferido |
 | adb | pacote `adb` | Debian (já traz as regras udev) |
 | Desktop | LXQt + SDDM | Debian |
 | Driver de vídeo X11 | `xserver-xorg-video-radeon` + Mesa | Debian |
-| GRUB | `grub-pc` (`i386-pc`) | Debian |
+| GRUB | `grub-efi-amd64` (`x86_64-efi`) | Debian — alvo `i386-pc` apenas se optar por CSM |
+
+### 4.4 Estado medido da máquina (21/10/2026)
+
+Levantado com `scripts/coleta-ambiente.sh`; documento completo em `docs/ambiente-de-testes.md`.
+
+| Item | Valor medido | Consequência para o plano |
+|---|---|---|
+| Distribuição atual | **Void Linux**, kernel **6.18.56_1**, x86_64 | M1 roda em Void/**runit** (§9.1); a imagem final continua Debian/systemd |
+| Init | **runit** (`/etc/sv`, `sv`) | Nada de `systemctl`/`journald` no M1; usar `sv` + `svlogd` |
+| Gerenciador de pacotes | `xbps` (o `dpkg` reporta 0) | M1 instala `adb`/`scrcpy` por `xbps-install`, não `apt` |
+| Memória | 1,5 GiB total, 1,1 GiB disponível, 470 MiB em uso | Orçamento de trabalho: ≤ 500 MB em repouso |
+| Swap | 7,8 GB em `/dev/sda3` (HDD), **sem zram** | Estado atual é o oposto do recomendado — comparar com e sem zram em M6 |
+| Vídeo | `radeon` ativo; sem sessão X durante a coleta | Recoletar `xrandr` com o LXQt/X rodando |
+| Ferramentas | `ffmpeg` 6.1.6 e Python 3.14.8 presentes; **`adb` e `scrcpy` ausentes** | Primeiro item do M1 |
+| Bateria | 55% da capacidade (2.069/3.766 mWh), descarregando | T12 precisa de hub alimentado desde já |
 
 ---
 
@@ -158,12 +183,12 @@ que roda em display virtual.
 
 ```
 ┌─────────────────────── Eee PC 1015BX ──────────────────────┐
-│  BIOS → GRUB (i386-pc) → kernel amd64 + initramfs          │
+│  UEFI → GRUB (x86_64-efi) → kernel amd64 + initramfs       │
 │    ↓                                                       │
-│  systemd (multi-user)                                      │
-│    ├─ zram swap (systemd-zram-generator)                   │
+│  [imagem] systemd          [bancada] runit (Void)          │
+│    ├─ zram swap            ├─ zram (zramen)                │
 │    ├─ SDDM → autologin usuário `dex` → sessão LXQt         │
-│    │     └─ autostart: ~/.config/autostart/dex-station.desktop
+│    │     └─ autostart (ou serviço) chamando o daemon       │
 │    │           └─ dex-station-session (daemon do kiosk)    │
 │    │                 ├─ consulta adb (2 s)                 │
 │    │                 ├─ aplica settings globais do Android │
@@ -178,10 +203,14 @@ que roda em display virtual.
 └────────────────────────────────────────────────────────────┘
 ```
 
+O **daemon é o mesmo** nos dois ambientes; só o invólucro muda: unit do systemd na imagem,
+serviço de runit em `/etc/sv/dex-station/` na bancada.
+
 ### Fluxo de boot
 
-1. A BIOS carrega o GRUB; o kernel amd64 sobe com o systemd.
-2. `systemd-zram-generator` cria swap comprimido na RAM (ajuda no 2 GB, ao custo de CPU).
+1. A **UEFI** carrega o GRUB do ESP; o kernel amd64 sobe. (Na bancada atual: GRUB de Void.)
+2. O sistema cria swap comprimido na RAM — `systemd-zram-generator` na imagem, `zramen` no
+   Void. **Nota:** a instalação atual ainda está sem zram e com 7,8 GB de swap no HDD.
 3. SDDM faz autologin do usuário `dex` e abre a sessão LXQt.
 4. O daemon `dex-station-session` sobe e mostra a **tela de espera**: papel de parede com
    instruções e um atalho de terminal.
@@ -230,8 +259,10 @@ IDLE ──(celular autorizado)──► PREPARING ──(ok)──► RUNNING
 
 - Artefato: a **mesma** `dex-station.img` (~2,5–3 GB), gravada em pendrive USB 2.0+ de
   **8 GB ou mais** (4 GB é apertado porque a imagem cresce com LXQt e firmware).
-- Boot: ligar o netbook segurando **Esc** → escolher a unidade USB. Se ela não aparecer:
-  **F2** na inicialização → aba *Boot* → *USB Boot* / prioridade de boot.
+- Boot: ligar o netbook segurando **Esc** e escolher a unidade USB. Como o firmware é
+  **UEFI**, o pendrive só aparece se tiver a entrada `EFI/BOOT/BOOTX64.EFI` — que é
+  justamente o que o `grub-install --removable` grava (§8, item 6). Se não aparecer:
+  **F2** → *Boot* → *USB Boot* habilitado e, se houver, *CSM/Legacy* ligado como plano B.
 - O HD do netbook permanece **intocado** — este é o critério de aceite principal (T8).
 - Persistência: **não há**, de propósito. Cada boot começa do zero. Se isso for necessário
   no futuro, o caminho é squashfs + overlayfs (fora do escopo da v1).
@@ -253,21 +284,29 @@ Sequência obrigatória:
 1. **Verificação**: o alvo é um disco (não uma partição), não está montado, e a geometria
    confere com o `lsblk`.
 2. **Backup** antes de apagar:
-   - tabela de partições (`sfdisk --dump`) e cópia do MBR
-     (`dd if=/dev/sdX of=mbr.bin bs=512 count=1`);
+   - tabela de partições (`sgdisk --backup=` / `sfdisk --dump`) e cópia dos primeiros MiB
+     (`dd if=/dev/sdX of=mbr-e-gpt.bin bs=1M count=2`);
+   - **ESP atual** (contém o bootloader que está funcionando hoje): `tar` de `/boot/efi`;
    - `tar` de `/home` e `/etc` do sistema atual;
-   - manifesto dos pacotes instalados (`dpkg --get-selections`);
+   - manifesto dos pacotes (`xbps-query -l` no Void de hoje; `dpkg --get-selections` na imagem);
    - opcionalmente imagem completa (`dd`), se houver espaço — avisando que o HDD do 1015BX
      grava a ~20–25 MB/s (≈ 1,5 GB/min).
-3. **Particionamento** (BIOS legado, MBR para máxima compatibilidade):
-   - deixar **1 MiB livres no começo do disco** (área onde o GRUB grava o `core.img`);
-   - p1: `boot`, 512 MiB, `ext4`, flag `boot`;
+3. **Particionamento — GPT com ESP** (é o modo em que a máquina realmente dá boot):
+   - p1: **ESP**, 512 MiB, `fat32`, flags `boot,esp` (substitui a ESP atual de 256 MiB);
    - p2: `root`, restante do disco, `ext4`.
-   - Alternativa: GPT com uma partição `bios_grub` de 1 MiB, caso o BIOS reclame do MBR.
-4. `mkfs.ext4` com `-m 0` (sem espaço reservado a root) e ajustes de `tune2fs`.
-5. Cópia do rootfs com `rsync -aHAX`; `fstab` por `UUID` com `noatime`.
-6. `update-initramfs -u`, `grub-install --target=i386-pc /dev/sdX`, `grub-mkconfig -o
-   /boot/grub/grub.cfg`.
+   - **Plano B (CSM/legado):** se o firmware não bootar em UEFI, refazer com MBR + 1 MiB
+     livres no início (`bios_grub`) e GRUB `i386-pc`. Só usar depois de esgotar o caminho UEFI.
+4. `mkfs.fat -F32` na ESP; `mkfs.ext4 -m 0` na raiz, com ajustes de `tune2fs`.
+5. Cópia do rootfs com `rsync -aHAX`; `fstab` por `UUID` com `noatime` e a ESP em
+   `/boot/efi` (`vfat`, `umask=0077`).
+6. `update-initramfs -u` e:
+   ```bash
+   grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+                --bootloader-id=dex-station --removable --no-nvram
+   grub-mkconfig -o /boot/grub/grub.cfg
+   ```
+   `--removable` grava `EFI/BOOT/BOOTX64.EFI` (funciona sem entrada na NVRAM, essencial para
+   pendrive) e `--no-nvram` evita mexer na NVRAM da máquina de build.
 7. Ordem de boot: HD primeiro; o pendrive continua bootável como plano B.
 
 ---
@@ -288,7 +327,10 @@ Sequência obrigatória:
   6. Cadeia de fallback A → B → C.
   7. Limpeza no unplug/desligamento: `settings delete global overlay_display_devices`,
      encerrar o scrcpy, restaurar a tela de espera.
-  8. Log no journal (`systemd-cat`) + arquivo rotativo em `/var/log/dex-station/`.
+  8. Log: **arquivo rotativo** em `/var/log/dex-station/` (funciona em runit e systemd) e,
+      quando houver systemd, espelho no journal via `systemd-cat`. `svlogd` no Void.
+- **Sem dependência de init**: o script não chama `systemctl`. Quem liga/desliga é o invólucro
+  (`/etc/sv/dex-station/run` no Void; unit no Debian).
 - **Configuração** (`/etc/dex-station/config`):
   ```
   METHOD=auto            # auto | new-display | overlay | mirror
@@ -297,7 +339,7 @@ Sequência obrigatória:
   FPS=15
   BITRATE=4M
   VIDEO_CODEC=h264
-  AUDIO=off              # on | off  (off por padrão: 2 GB de RAM)
+  AUDIO=off              # on | off  (off por padrão: 1,5 GiB de RAM útil)
   RENDER_DRIVER=software # software | opengl
   KEYBOARD=sdk           # sdk | uhid
   MOUSE=sdk              # sdk | uhid
@@ -309,6 +351,29 @@ Sequência obrigatória:
 - **Ponto de falha conhecido**: com a tela do celular bloqueada, o adb conecta mas o DeX não
   sobe. O daemon deve detectar isso e mostrar a instrução "desbloqueie o celular" em vez de
   travar o loop.
+
+### 9.1.1 Ensaio na bancada atual (Void Linux + runit)
+
+O M1 roda na instalação que já existe, sem trocar de sistema. Diferenças em relação à imagem:
+
+| Item | Na imagem (Debian) | Na bancada (Void) |
+|---|---|---|
+| Pacotes | `apt install adb scrcpy` | `xbps-install -S android-tools scrcpy` (confira o nome com `xbps-query -Rs scrcpy`) |
+| Serviço | unit `dex-station.service` | `/etc/sv/dex-station/run` + `ln -s /etc/sv/dex-station /var/service/` |
+| Log | journal + arquivo | `svlogd` em `/var/log/dex-station/` |
+| zram | `systemd-zram-generator` | pacote `zramen` (ou seguir com o swap em disco e anotar a diferença) |
+| Usuário/grupos | `dex` | usuário atual + grupos `audio video input` (`usermod -aG`) |
+
+Exemplo de `run` (runit):
+
+```sh
+#!/bin/sh
+exec 2>&1
+exec chpst -u larissa /usr/local/bin/dex-station-session
+```
+
+O `dex-station-launch` deve detectar o init (`/run/systemd/system` vs `/etc/sv`) para escolher
+`systemctl` ou `sv` — assim o mesmo comando serve nas duas fases.
 
 ### 9.2 `runtime/dex-station-launch`
 
@@ -323,11 +388,11 @@ Sequência obrigatória:
 
 ### 9.4 `build/build-dex-station.sh`
 
-- Gera `dex-station.img` a partir de um host x86_64 Debian/Ubuntu (o próprio netbook serve,
-  se tiver espaço).
+- Gera `dex-station.img` a partir de um host x86_64 Debian/Ubuntu — **na prática, o PC de
+  bancada (Linux Mint)**, não o netbook: o netbook roda Void, tem 1,5 GiB de RAM e HDD lento.
 - Etapas: `debootstrap` trixie → `chroot` → `post-install.sh` → `update-initramfs` →
-  `grub-install --target=i386-pc` no arquivo de imagem (via *loop device*, com 1 MiB livre
-  antes da primeira partição) → `sync` → fechamento da imagem.
+  particionamento **GPT + ESP** no arquivo de imagem (via *loop device*) →
+  `grub-install --target=x86_64-efi --removable --no-nvram` → `sync` → fechamento da imagem.
 - **Rastreabilidade**: `SHA256SUMS` do artefato + versões fixadas (scrcpy, adb, kernel) em
   `build/VERSIONS.lock`. O build é **repetível**, não bit-a-bit reproduzível (debootstrap e
   `apt` gravam timestamps e estados próprios).
@@ -335,8 +400,10 @@ Sequência obrigatória:
 ### 9.5 `build/post-install.sh` (executa dentro do chroot)
 
 - Pacotes: `linux-image-amd64 systemd-sysv lxqt sddm adb xdg-utils xbindkeys
-  x11-xserver-utils xserver-xorg-video-radeon firmware-amd-graphics firmware-brcm80211
+  x11-xserver-utils xserver-xorg-video-radeon firmware-amd-graphics
   zram-tools|systemd-zram-generator wget ca-certificates`.
+  **Não** incluir `firmware-brcm80211`: o Wi-Fi medido é Atheros AR9285 (`ath9k`), que não
+  usa firmware proprietário.
 - **scrcpy**: baixa o tarball oficial `scrcpy-linux-x86_64-v<VER>.tar.gz`, confere o SHA-256,
   instala em `/opt/scrcpy` e cria symlink em `/usr/local/bin`. Se o binário exigir bibliotecas
   além da glibc da trixie, usar o pacote `scrcpy` do Debian como alternativa.
@@ -367,6 +434,8 @@ Sequência obrigatória:
 - `journald.conf` (`Storage=persistent` com `SystemMaxUse=32M` — em HDD, 32 MB de log é
   barato e salva o diagnóstico depois de um travamento).
 - `sysctl`/`modules`: `radeon` (GPU) e `snd-hda-intel` (áudio). **Não** usar `i915` (Intel).
+  No kernel medido (6.18) o `amdgpu` também carrega, mas não assume o Wrestler — o driver
+  efetivo é o `radeon`; não é preciso blacklistar, só não contar com aceleração do `amdgpu`.
 
 ### 9.7 `scripts/`
 
@@ -408,7 +477,7 @@ Sequência obrigatória:
 | `--render-driver` | `software` | evita instabilidade de GL no Radeon HD 6290; testar `opengl` como otimização |
 | `--turn-screen-off` | ativo | economiza bateria do celular |
 | `--keep-active` | ativo | impede o celular de dormir |
-| `--no-audio` | padrão | opus é barato, mas 2 GB de RAM pede economia; se ligado, usar o P2 (fone) |
+| `--no-audio` | padrão | opus é barato, mas 1,5 GiB de RAM útil pede economia; se ligado, usar o P2 (fone) |
 | `--mouse` / `--keyboard` | `sdk` | modo absoluto funciona melhor com trackpad |
 | Compositor | desligado | a APU não compensa a camada extra |
 
@@ -432,9 +501,9 @@ hardware melhor.
 | T8 | Live USB | boot pelo pendrive; **HD intocado** (tabela e checksums inalterados) |
 | T9 | Rede | dados trafegam pelo USB; internet via tethering opcional |
 | T10 | Instalação HD | backup gerado; imagem gravada; GRUB instalado; boot pelo HD |
-| T11 | Performance | CPU < 60% e RAM < 400 MB em repouso por 30 min; sem travamento |
-| T12 | Energia | celular carregando via hub alimentado; temperatura do netbook estável |
-| T13 | Recuperação | `Ctrl+Alt+F2` → TTY; `dex-station restart`; `emergency.target` |
+| T11 | Performance | CPU < 60% e RAM < 450 MB em repouso por 30 min; **1,5 GiB no total**; sem travamento |
+| T12 | Energia | celular carregando via hub alimentado; temperatura estável; **bateria do netbook já em 55%** |
+| T13 | Recuperação | `Ctrl+Alt+F2` → TTY; `dex-station restart`; saída de emergência (systemd ou runit) |
 | T14 | Autonomia | sem celular: não trava, não reinicia, tela de espera persistente |
 
 ---
@@ -446,13 +515,14 @@ hardware melhor.
 | DeX novo não aparece em display virtual em algum One UI 8.x | Média | Médio | Cadeia de fallback; testar no aparelho real cedo (M2) |
 | Porta USB (500 mA) drena a bateria do netbook | Alta | Médio | Hub alimentado; `--turn-screen-off`; documentar no README |
 | Radeon HD 6290 engasga na decodificação por CPU | Média | Médio | 1024×600/15 fps; se falhar, 800×480 |
-| 2 GB de RAM (≈1,7 GB úteis) estoura com LXQt + scrcpy | Média | Alto | zram 1 GB; sem compositor; áudio off; `swap` só em zram |
+| 2 GB de RAM (**1,5 GiB úteis medidos**) estoura com LXQt + scrcpy | **Alta** | Alto | zram 1 GB; sem compositor; áudio off; trocar SDDM por algo mais leve; budget ≤ 500 MB |
 | Trackpad com movimento "absoluto" estranho | Média | Baixo | `--mouse=sdk` padrão; testar `uhid` |
 | Layout de teclado divergente (ABNT2 × US intl) | Alta | Baixo | Configurar teclado físico no celular; alternativa `--keyboard=sdk` |
-| Sem internet no netbook (firmware Wi-Fi ausente) | Média | Médio | Incluir `firmware-brcm80211`; validar na instalação; tethering USB como plano B |
-| Disco/tabela de partição antiga atrapalha o boot | Média | Alto | `install-on-disk.sh` zera o disco; backup obrigatório |
-| BIOS não oferece boot por USB | Baixa | Alto | Habilitar *USB Boot* no F2; alternativa: gravar o HD por outro PC com adaptador USB-SATA |
+| Tabela de partição / ESP atual atrapalha o boot | Média | Alto | Backup da ESP e da tabela antes; imagem em GPT com `BOOTX64.EFI` (`--removable`) |
+| Firmware UEFI não lista o pendrive | Média | Alto | Entrada `EFI/BOOT/BOOTX64.EFI`; *USB Boot* no F2; CSM como plano B |
 | HDD 5400 rpm lento | Alta | Médio | zram em vez de swap; desligar automount SD; `fstrim` off |
+| Bateria do netbook com 55% da capacidade | **Alta** | Médio | Hub alimentado obrigatório; T12 com bateria cheia; considerar troca de bateria |
+| Swap atual de 7,8 GB no HDD (sem zram) | Alta | Médio | Ativar zram (`zramen` no Void) antes de medir; registrar a diferença nos dados |
 | Build oficial do scrcpy incompatível com glibc da trixie | Baixa | Médio | Pacote `scrcpy` do Debian ou compilar do fonte |
 | Superaquecimento / throttle do C-60 (9 W, cooler de netbook) | Média | Baixo | Limpar o cooler; não bloquear as saídas de ar; monitorar temperatura em T12 |
 
@@ -463,7 +533,7 @@ hardware melhor.
 | Fase | Entregável | Depende de |
 |---|---|---|
 | **M0** | Este plano + esqueleto do repositório | — |
-| **M1** | `dex-station-session` + `dex-station-launch` funcionando **na distro atual** do netbook | M0 |
+| **M1** | `dex-station-session` + `dex-station-launch` funcionando **no Void/runit atual**, com adb/scrcpy instalados por `xbps` | M0 |
 | **M2** | Validação no aparelho real: DeX virtual + entrada (T3–T7) | M1 + celular |
 | **M3** | `build-dex-station.sh` + `post-install.sh` + overlay → `dex-station.img` | M2 |
 | **M4** | `make-live-usb.sh` → boot pelo pendrive (T8, T9, T14) | M3 |
@@ -497,11 +567,14 @@ dex-station/
 │   ├── install-on-disk.sh
 │   ├── backup-disk.sh
 │   ├── restore-disk.sh
-│   └── flash-netbook.sh
+│   ├── flash-netbook.sh
+│   └── coleta-ambiente.sh      # inventário da máquina (--mascarar para publicar)
 ├── docs/
 │   ├── OPERATOR.md
 │   ├── BUILD.md
-│   └── TROUBLESHOOTING.md
+│   ├── TROUBLESHOOTING.md
+│   ├── ambiente-de-testes.md   # S1-P1-01 (gerado)
+│   └── fotos/                  # evidências da bancada
 └── tests/
     ├── test-config.sh
     ├── test-state-machine.sh
@@ -536,12 +609,16 @@ dex-station/
 
 1. **Persistência no pendrive** — v1 sem persistência. Persistência real exigiria
    squashfs + overlayfs. Confirmar se é requisito.
-2. **Áudio** — padrão desligado na v1 (2 GB de RAM). O netbook tem P2 de fone, então há
-   como ouvir sem depender dos alto-falantes fracos. Reavaliar depois do T11.
+2. **Áudio** — padrão desligado na v1 (1,5 GiB de RAM útil). O netbook tem P2 de fone, então
+   há como ouvir sem depender dos alto-falantes fracos. Reavaliar depois do T11.
 3. **Idiomas** — sistema em pt_BR (padrão) ou en_US com mensagens em português?
 4. **Nível de "dedicação"** — remover o apt (imagem imutável) ou manter para manutenção?
    Recomendo manter, com apt disponível no TTY de manutenção.
 5. **Segundo uso** — apenas DeX, ou também um navegador local no netbook? Isso muda a
    decisão de manter o LXQt completo.
 6. **Gerenciador de sessão** — SDDM (padrão, ~60–80 MB) ou algo mais leve
-   (`lightdm`/`startx`) para preservar RAM no 2 GB?
+   (`lightdm`/`startx`) para preservar RAM no 1,5 GiB?
+7. **UEFI vs CSM** — a máquina dá boot em UEFI (GPT + ESP). Manter só esse caminho, ou
+   também gerar uma variante MBR/`i386-pc` para outras unidades de 1015BX?
+8. **Trocar o Void por Debian antes do M5, ou manter os dois?** A instalação no HD substitui
+   o sistema atual; o backup da ESP e do `/home` precisa estar pronto antes.
