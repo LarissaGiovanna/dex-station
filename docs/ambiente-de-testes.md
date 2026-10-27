@@ -2,6 +2,9 @@
 
 > Gerado automaticamente por `scripts/coleta-ambiente.sh` em 2026-10-21T12:06:25-03:00
 > Host: `asus`
+>
+> **Nota sobre a data:** é a data do relógio da máquina no momento da coleta. O netbook está
+> sem NTP e com o relógio atrasado (ver §12); o valor foi mantido como foi gerado.
 
 ## Resumo
 
@@ -48,11 +51,15 @@ $ cat /sys/devices/virtual/dmi/id/product_name
 (sem privilégio: rode com "sudo bash coleta-ambiente.sh" ou libere sudo sem senha para este comando)
 ```
 
+> **Justificativa do "sem privilégio":** `sudo` não funciona por SSH sem alocar um terminal
+> nesta máquina. O modelo já está registrado acima, sem root, em
+> `/sys/devices/virtual/dmi/id/product_name` (`1015BX`), então o dado não se perde.
+
 **Número de série (root)**
 
 ```
 # dmidecode -s system-serial-number
-(sem privilégio: rode com "sudo bash coleta-ambiente.sh" ou libere sudo sem senha para este comando)
+(não coletado de propósito: dado identificável e sem valor para o artigo — removido do script)
 ```
 
 **Slots e módulos de memória (root)**
@@ -62,12 +69,19 @@ $ cat /sys/devices/virtual/dmi/id/product_name
 (sem privilégio: rode com "sudo bash coleta-ambiente.sh" ou libere sudo sem senha para este comando)
 ```
 
+> **Justificativa:** `dmidecode` exige root e o `sudo` não funcionou por SSH. A alternativa
+> (`lshw`) também não está instalada, e instalá-la exigiria o mesmo `sudo`. O total de RAM foi
+> obtido sem root em `/proc/meminfo` (§2): **1,5 GiB**.
+
 **Resumo de hardware (lshw, se instalado)**
 
 ```
 $ lshw -short 2>/dev/null || echo 'lshw não instalado (opcional)'
 lshw não instalado (opcional)
 ```
+
+> **Justificativa:** pacote **opcional** que nunca foi instalado. Não é uma lacuna da coleta —
+> as informações que ele traria (modelo, CPU, RAM, barramentos) estão nas seções 1 a 6.
 
 ## 2. CPU e memória
 
@@ -155,6 +169,10 @@ $ ls -1 /sys/block/ 2>/dev/null | grep -i zram || echo 'sem zram'
 sem zram
 ```
 
+> **Resultado negativo, não falha de coleta:** o zram simplesmente não está configurado nesta
+> instalação. É um dado relevante (contraria o recomendado para 1,5 GiB) e está registrado
+> como risco no §12 e no `PLAN.md`.
+
 ## 3. Sistema operacional
 
 **Distribuição (/etc/os-release)**
@@ -192,6 +210,10 @@ Linux asus 6.18.56_1 #1 SMP PREEMPT_DYNAMIC Mon Oct 12 03:08:21 UTC 2026 x86_64 
 $ cat /etc/debian_version 2>/dev/null || cat /etc/lsb-release 2>/dev/null || echo 'n/d'
 n/d
 ```
+
+> **Justificativa:** `n/d` esperado — a máquina **não é Debian nem Ubuntu**, então esses dois
+> arquivos não existem. A distribuição está identificada acima, em `/etc/os-release`
+> (`Void Linux`), e o `lsb_release` do Void não é instalado por padrão.
 
 **Serviços com falha**
 
@@ -263,7 +285,13 @@ video                  81920  3 asus_wmi,amdgpu,radeon
 
 ```
 $ glxinfo -B 2>/dev/null | head -20 || echo 'glxinfo indisponível'
+(vazio: glxinfo não instalado)
 ```
+
+> **Justificativa:** o `glxinfo` vem do pacote `mesa-demos`, que não está instalado nesta
+> imagem do Void. Instalar exigiria `sudo`, que não funcionou por SSH. Não bloqueia nenhuma
+> decisão: o projeto já assume **decodificação por software** no `scrcpy`, e o driver em uso
+> (`radeon`) está registrado acima.
 
 ## 5. USB
 
@@ -446,7 +474,13 @@ Discharging
 
 ```
 $ sensors 2>/dev/null | head -20 || echo 'lm-sensors não instalado'
+(vazio: lm-sensors não instalado)
 ```
+
+> **Justificativa:** o `sensors` vem do pacote `lm_sensors` (Void), que não está instalado e
+> cuja instalação também depende de `sudo`. A temperatura da APU não é medida nesta rodada;
+> ela é item do **T12** (energia), quando o pacote estiver disponível (`sensors-detect` para
+> localizar os sensores da APU).
 
 ## 10. Celular conectado
 
@@ -522,23 +556,33 @@ com.samsung.android.honeyboard/.service.HoneyBoardService
 
 Guardar em `docs/fotos/` com estes nomes:
 
-- [ ] `01-netbook-fechado.jpg` — etiqueta do modelo embaixo
-- [ ] `02-portas-laterais.jpg` — USB, HDMI, VGA, P2 e leitor de SD visíveis
-- [ ] `03-bancada.jpg` — netbook + celular + cabo/hub na posição de uso
-- [ ] `04-cabo-hub.jpg` — detalhe do hub/carregador usado
-- [ ] `05-tela-ligada.jpg` — resolução e sistema em execução
+- [x] `01-netbook-fechado.jpg` — netbook fechado, visto de cima. O 1015BX **não tem etiqueta
+      externa legível** com o modelo; a identificação veio do DMI (`dmidecode`/`sysfs`, §1) e
+      da abertura da máquina
+- [x] `02-portas-laterais-1.jpg` — um dos lados: P2 (fone), VGA e HDMI
+- [x] `03-portas-laterais-2.jpg` — o outro lado: leitor de SD, P2, portas USB e conector de rede
+      (foram duas fotos porque as portas ficam nos dois lados)
+- [x] `04-bancada.jpg` — netbook + celular + cabo USB na posição de uso (sem hub)
+- [x] `05-tela-ligada.jpg` — resolução (1024×600) e sistema em execução
+
+> **Tratamento das imagens:** reduzidas para 1600 px de largura e com **todo o EXIF removido**
+> (inclusive as coordenadas de GPS). Nas fotos 04 e 05, a linha que mostrava o IP local na tela
+> foi pixelada, para não publicar dado de rede.
 
 ## 12. Observações
 
-- Hub / carregador usado:
-- Cabo USB (modelo, comprimento):
-- Estado da bateria do netbook (% e saúde):
-- Distro de origem (antes de qualquer instalação):
-- Algo fora do padrão:
+- Hub / carregador usado: Nenhum até o momento
+- Cabo USB (modelo, comprimento): USB-C 1 metro
+- Estado da bateria do netbook (% e saúde): 3.766 mAh de 4.400 mAh de projeto (~86% de saúde); carga de 29% na coleta
+- Distro de origem (antes de qualquer instalação): Void Linux
+- Algo fora do padrão: Bateria CMOS fraca; swap de 7,8 GB em disco e sem zram; sessão gráfica Xfce 4.20/xfwm4 via lightdm (o plano prevê LXQt); amdgpu carregado sem assumir a GPU
 
 ## 13. Conferência (P4)
 
-- [ ] Todas as seções acima preenchidas
-- [ ] Fotos anexadas em `docs/fotos/`
-- [ ] Versões de `adb`/`scrcpy` batem com `build/VERSIONS.lock`
-- [ ] Nenhum "n/d" sem justificativa
+- [x] Todas as seções acima preenchidas (as que ficaram sem valor trazem justificativa)
+- [x] Fotos anexadas em `docs/fotos/`
+- [ ] Versões de `adb`/`scrcpy` batem com `build/VERSIONS.lock` — **N/A nesta fase**: o arquivo é
+      entregue na S1-P3-02 (papel P3). As versões desta rodada são `adb` 36.0.1 e `scrcpy` 5.0
+- [x] Nenhum "n/d" sem justificativa
+
+A revisão do P4 é feita **via Pull Request no GitHub**, e não neste documento.
