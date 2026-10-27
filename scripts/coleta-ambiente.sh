@@ -5,9 +5,11 @@
 #   ./coleta-ambiente.sh              # gera ./ambiente-de-testes.md
 #   ./coleta-ambiente.sh saida.md    # nome/arquivo alternativo
 #
-# Roda sem root: os comandos que exigem root (dmidecode) são tentados com sudo -n
-# e, se não der, o script segue sem eles.
-#
+# Roda sem root. Se você quiser os dados que só o root lê (dmidecode, lshw),
+# execute com sudo. O script detecta sozinho:
+#   - rodando como root  → usa root direto;
+#   - sudo sem senha     → usa "sudo -n";
+#   - sem nenhum dos dois → apenas marca a seção como "precisa de root".
 # Não usa "set -e" de propósito: comando ausente não pode abortar a coleta.
 
 set -uo pipefail
@@ -15,6 +17,7 @@ set -uo pipefail
 OUT="${1:-ambiente-de-testes.md}"
 DATA_ISO="$(date -Iseconds)"
 HOST="$(hostname 2>/dev/null || echo desconhecido)"
+DONO_ORIGINAL="${SUDO_USER:-}"
 
 # ---------------------------------------------------------------- utilitários
 
@@ -33,7 +36,36 @@ run() {
     printf '```\n'
 }
 
+run_root() {
+    local desc="$1" cmd="$2"
+    printf '\n**%s (root)**\n\n```\n# %s\n' "$desc" "$cmd"
+    if como_root "$cmd" >/tmp/coleta.$$ 2>&1; then
+        cat /tmp/coleta.$$
+    else
+        local rc=$?
+        cat /tmp/coleta.$$
+        printf '\n(saída com código %s)\n' "$rc"
+    fi
+    rm -f /tmp/coleta.$$
+    printf '```\n'
+}
+
 tem() { command -v "$1" >/dev/null 2>&1; }
+
+# como_root "comando" — executa com privilégio quando possível, sem travar esperando senha.
+# Assim, um script rodado por SSH nunca fica parado num prompt invisível.
+como_root() {
+    local cmd="$1"
+    if [ "$(id -u)" -eq 0 ]; then
+        bash -c "$cmd"
+    elif sudo -n true 2>/dev/null; then
+        sudo -n bash -c "$cmd"
+    else
+        printf '(sem privilégio: rode com "sudo bash %s" ou libere sudo sem senha para este comando)\n' \
+            "$(basename "$0")"
+        return 0
+    fi
+}
 
 valor_debian() { # valor_debian ARQUIVO CHAVE
     [ -r "$1" ] || { echo ""; return; }
@@ -77,9 +109,11 @@ valor_debian() { # valor_debian ARQUIVO CHAVE
 
 run "Data e hora" "date -Iseconds" >> "$OUT"
 run "Modelo / fabricante (DMI)" "cat /sys/devices/virtual/dmi/id/sys_vendor /sys/devices/virtual/dmi/id/product_name /sys/devices/virtual/dmi/id/product_version 2>/dev/null" >> "$OUT"
-run "Modelo (dmidecode, se disponível)" "sudo -n dmidecode -s system-product-name 2>/dev/null || echo 'precisa de root — pular'" >> "$OUT"
-run "Número de série" "sudo -n dmidecode -s system-serial-number 2>/dev/null || echo 'precisa de root — pular'" >> "$OUT"
-run "Tempo ligado" "uptime -p 2>/dev/null || uptime" >> "$OUT"
+run "Modelo (DMI, sem root)" "cat /sys/devices/virtual/dmi/id/product_name" >> "$OUT"
+run_root "Modelo (dmidecode)" "dmidecode -s system-product-name" >> "$OUT"
+run_root "Número de série" "dmidecode -s system-serial-number" >> "$OUT"
+run_root "Slots e módulos de memória" "dmidecode -t memory | grep -E 'Size|Speed|Type:|Locator|Maximum Capacity' | grep -v 'No Module'" >> "$OUT"
+run "Resumo de hardware (lshw, se instalado)" "lshw -short 2>/dev/null || echo 'lshw não instalado (opcional)'" >> "$OUT"run "Tempo ligado" "uptime -p 2>/dev/null || uptime" >> "$OUT"
 
 # ---------------------------------------------------------------- 2. CPU e RAM
 
@@ -246,6 +280,18 @@ Guardar em `docs/fotos/` com estes nomes:
 - [ ] Versões de `adb`/`scrcpy` batem com `build/VERSIONS.lock`
 - [ ] Nenhum "n/d" sem justificativa
 FIM
+
+# Se foi rodado com "sudo bash ...", devolve o arquivo para o usuário — senão ele fica
+# com dono root e o git (rodando como usuário) não consegue nem ler.
+if [ -n "$DONO_ORIGINAL" ] && [ "$(id -u)" -eq 0 ]; then
+    chown "$DONO_ORIGINAL": "$OUT" 2>/dev/null && \
+        printf 'Propriedade do arquivo devolvida para %s.\n' "$DONO_ORIGINAL"
+fi
+
+if [ "$(id -u)" -ne 0 ] && ! sudo -n true 2>/dev/null; then
+    printf '\nObservação: seções "(root)" ficaram vazias.\n'
+    printf 'Para preenchê-las, rode: sudo bash %s %s\n' "$(basename "$0")" "$OUT"
+fi
 
 printf '\nArquivo gerado: %s\n' "$OUT"
 printf 'Próximo passo: revisar, anexar as fotos e commitar em docs/.\n'
