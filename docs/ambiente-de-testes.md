@@ -1,6 +1,6 @@
 # Ambiente de testes — DeX Station
 
-> Gerado automaticamente por `scripts/coleta-ambiente.sh` em 2026-10-21T11:57:40-03:00
+> Gerado automaticamente por `scripts/coleta-ambiente.sh` em 2026-10-21T12:06:25-03:00
 > Host: `asus`
 
 ## Resumo
@@ -22,7 +22,7 @@
 
 ```
 $ date -Iseconds
-2026-10-21T11:57:40-03:00
+2026-10-21T12:06:25-03:00
 ```
 
 **Modelo / fabricante (DMI)**
@@ -90,7 +90,7 @@ Core(s) per socket:                      2
 Socket(s):                               1
 Stepping:                                0
 Frequency boost:                         enabled
-CPU(s) scaling MHz:                      101%
+CPU(s) scaling MHz:                      100%
 CPU max MHz:                             1000.0000
 CPU min MHz:                             800.0000
 BogoMIPS:                                1995.89
@@ -127,7 +127,7 @@ Vulnerability Vmscape:                   Not affected
 ```
 $ free -h
                total        used        free      shared  buff/cache   available
-Mem:           1.5Gi       413Mi       762Mi       3.9Mi       537Mi       1.1Gi
+Mem:           1.5Gi       417Mi       758Mi       3.9Mi       537Mi       1.1Gi
 Swap:          7.8Gi          0B       7.8Gi
 ```
 
@@ -136,7 +136,7 @@ Swap:          7.8Gi          0B       7.8Gi
 ```
 $ grep -E 'MemTotal|MemAvailable|SwapTotal' /proc/meminfo
 MemTotal:        1612116 kB
-MemAvailable:    1188080 kB
+MemAvailable:    1184344 kB
 SwapTotal:       8220668 kB
 ```
 
@@ -213,20 +213,15 @@ $ if command -v dpkg >/dev/null; then dpkg -l | grep -c '^ii'; elif command -v x
 
 ```
 $ if command -v xrandr >/dev/null 2>&1 && xrandr >/dev/null 2>&1; then xrandr; else echo 'xrandr indisponível (sessão gráfica não está rodando)'; echo; echo '--- modos suportados pelo kernel (DRM) ---'; for m in /sys/class/drm/card*/modes; do [ -s "$m" ] && { echo "$m:"; head -5 "$m"; }; done; echo '--- status das saídas ---'; for s in /sys/class/drm/card*-\*/status; do [ -s "$s" ] && printf '%s: %s\n' "$s" "$(cat "$s")"; done; fi
-xrandr indisponível (sessão gráfica não está rodando)
-
---- modos suportados pelo kernel (DRM) ---
-/sys/class/drm/card0-HDMI-A-1/modes:
-/sys/class/drm/card0-LVDS-1/modes:
-1024x600
-800x600
-848x480
-720x480
-640x480
-/sys/class/drm/card0-VGA-1/modes:
---- status das saídas ---
-
-(saída com código 1)
+Screen 0: minimum 320 x 200, current 1024 x 600, maximum 8192 x 8192
+LVDS connected 1024x600+0+0 (normal left inverted right x axis y axis) 223mm x 125mm
+   1024x600      60.00*+
+   800x600       59.96  
+   848x480       59.94  
+   720x480       59.94  
+   640x480       59.94  
+HDMI-0 disconnected (normal left inverted right x axis y axis)
+VGA-0 disconnected (normal left inverted right x axis y axis)
 ```
 
 **Driver em uso**
@@ -443,7 +438,7 @@ $ command -v adb scrcpy ffmpeg python3 2>/dev/null || echo 'n/d'
 $ f=0; for b in /sys/class/power_supply/BAT*; do [ -d "$b" ] || continue; f=1; echo "$b"; cat "$b/status" "$b/energy_now" "$b/energy_full" 2>/dev/null; cat "$b/charge_now" "$b/charge_full" 2>/dev/null; done; [ $f -eq 1 ] || echo 'sem bateria detectada'
 /sys/class/power_supply/BAT0
 Discharging
-1263000
+1096000
 3766000
 ```
 
@@ -547,5 +542,3 @@ Guardar em `docs/fotos/` com estes nomes:
 - [ ] Fotos anexadas em `docs/fotos/`
 - [ ] Versões de `adb`/`scrcpy` batem com `build/VERSIONS.lock`
 - [ ] Nenhum "n/d" sem justificativa
-
-> IPs privados e endereços MAC foram mascarados (`--mascarar`) antes da publicação.
