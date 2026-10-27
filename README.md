@@ -24,7 +24,7 @@ Samsung Galaxy (One UI 8 / Android 16)  ──cabo USB──►  Eee PC 1015BX
 | Portas | 3× USB 2.0, **HDMI** e **VGA** (ambas somente saída), Ethernet 10/100, leitor de cartão SD, P2 de áudio (fone/microfone) |
 | Rede | Ethernet + Wi-Fi Atheros AR9285 (`ath9k`, **sem firmware proprietário**) |
 | Firmware | **UEFI** (GPT + ESP), com CSM legado disponível — boot por USB com **Esc**, setup com **F2** |
-| Bateria | 6 células, hoje com **55% da capacidade** (2.069 de 3.766 mWh) |
+| Bateria | 6 células, ~86% da capacidade (3.766 de 4.400 mAh) |
 | Teclado | ABNT2 nos modelos vendidos no Brasil |
 
 Consequências práticas desse hardware:
@@ -40,7 +40,8 @@ Consequências práticas desse hardware:
   uma TV/monitor maior. A resolução do DeX continua 1024×600 — a imagem é ampliada, não
   ganha detalhe.
 - **O P2 de áudio é a saída natural para som**, caso o áudio seja ligado (padrão é desligado).
-- **Bateria degradada:** com 55% da capacidade, o hub alimentado deixa de ser opcional.
+- **Bateria degradada (~86%) e já vista com pouca carga**, o hub alimentado deixa de ser
+  opcional.
 
 ## Estado atual da máquina (medido em 21/10/2026)
 
@@ -48,9 +49,11 @@ Consequências práticas desse hardware:
 |---|---|
 | Distribuição | **Void Linux**, kernel 6.18.56_1, x86_64 |
 | Init | **runit** (não é systemd) |
-| Pacotes | `xbps`; `ffmpeg` e Python 3.14 presentes; **`adb` e `scrcpy` ainda não instalados** |
+| Pacotes | `xbps`; `adb` 36.0.1 e `scrcpy` 5.0 instalados; `ffmpeg` e Python 3.14 presentes |
 | Memória | 1,5 GiB total, ~1,1 GiB disponível, 470 MiB em uso |
 | Swap | 7,8 GB em partição do HDD, **sem zram** |
+| Sessão gráfica | `lightdm` (não SDDM), painel `LVDS` em 1024×600 |
+| Relógio | **sem NTP; atrasado 6 dias** — corrigir antes de qualquer medição datada |
 | Boot | UEFI com ESP de 256 MB em `/boot/efi` |
 
 O inventário completo (com as saídas de `lscpu`, `free`, `lsusb`, `lsblk`, `lspci`…) está em
