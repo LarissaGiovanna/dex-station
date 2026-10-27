@@ -141,7 +141,7 @@ run "Data e hora" "date -Iseconds" >> "$OUT"
 run "Modelo / fabricante (DMI)" "cat /sys/devices/virtual/dmi/id/sys_vendor /sys/devices/virtual/dmi/id/product_name /sys/devices/virtual/dmi/id/product_version 2>/dev/null" >> "$OUT"
 run "Modelo (DMI, sem root)" "cat /sys/devices/virtual/dmi/id/product_name" >> "$OUT"
 run_root "Modelo (dmidecode)" "dmidecode -s system-product-name" >> "$OUT"
-run_root "Número de série" "dmidecode -s system-serial-number" >> "$OUT"
+run "Número de série" "echo 'não coletado de propósito (dado identificável, sem valor para o artigo)'" >> "$OUT"
 run_root "Slots e módulos de memória" "dmidecode -t memory | grep -E 'Size|Speed|Type:|Locator|Maximum Capacity' | grep -v 'No Module'" >> "$OUT"
 run "Resumo de hardware (lshw, se instalado)" "lshw -short 2>/dev/null || echo 'lshw não instalado (opcional)'" >> "$OUT"run "Tempo ligado" "uptime -p 2>/dev/null || uptime" >> "$OUT"
 
