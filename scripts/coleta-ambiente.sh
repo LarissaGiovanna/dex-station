@@ -14,6 +14,9 @@
 
 set -uo pipefail
 
+MASCARAR="${MASCARAR:-0}"
+if [ "${1:-}" = "--mascarar" ]; then MASCARAR=1; shift; fi
+
 OUT="${1:-ambiente-de-testes.md}"
 DATA_ISO="$(date -Iseconds)"
 HOST="$(hostname 2>/dev/null || echo desconhecido)"
@@ -51,6 +54,33 @@ run_root() {
 }
 
 tem() { command -v "$1" >/dev/null 2>&1; }
+
+# Descobre o gerenciador de serviços — o netbook pode não ser systemd (Void usa runit).
+init_sistema() {
+    if tem systemctl && [ -d /run/systemd/system ]; then echo systemd
+    elif [ -d /etc/sv ] && tem sv; then echo runit
+    elif tem rc-service; then echo openrc
+    else echo desconhecido
+    fi
+}
+
+servico_ativo() { # servico_ativo ssh|sshd
+    local s="$1"
+    case "$(init_sistema)" in
+        systemd) systemctl is-active --quiet "$s" 2>/dev/null && echo ativo || echo inativo ;;
+        runit)   sv status "$s" 2>/dev/null | grep -q '^run:' && echo ativo || echo inativo ;;
+        openrc)  rc-service "$s" status >/dev/null 2>&1 && echo ativo || echo inativo ;;
+        *)       echo 'n/d' ;;
+    esac
+}
+
+pacotes_instalados() {
+    if tem dpkg; then dpkg -l 2>/dev/null | grep -c '^ii'
+    elif tem xbps-query; then xbps-query -l 2>/dev/null | grep -c '^ii'
+    elif tem pacman; then pacman -Q 2>/dev/null | wc -l
+    elif tem rpm; then rpm -qa 2>/dev/null | wc -l
+    else echo 'n/d'; fi
+}
 
 # como_root "comando" — executa com privilégio quando possível, sem travar esperando senha.
 # Assim, um script rodado por SSH nunca fica parado num prompt invisível.
@@ -136,10 +166,11 @@ run "zram configurado?" "ls -1 /sys/block/ 2>/dev/null | grep -i zram || echo 's
 } >> "$OUT"
 
 run "Distribuição (/etc/os-release)" "cat /etc/os-release" >> "$OUT"
+run "Init / gerenciador de serviços" "if [ -d /run/systemd/system ]; then echo systemd; elif [ -d /etc/sv ]; then echo runit; elif command -v rc-service >/dev/null 2>&1; then echo openrc; else echo 'desconhecido'; fi" >> "$OUT"
 run "Kernel e arquitetura" "uname -a" >> "$OUT"
 run "Versão detalhada" "cat /etc/debian_version 2>/dev/null || cat /etc/lsb-release 2>/dev/null || echo 'n/d'" >> "$OUT"
-run "Serviços com falha" "systemctl --failed --no-pager 2>/dev/null || echo 'sem systemd'" >> "$OUT"
-run "Pacotes instalados (contagem)" "dpkg -l 2>/dev/null | grep -c '^ii' || echo 'n/d'" >> "$OUT"
+run "Serviços com falha" "case \"\$(command -v systemctl)\" in '') if [ -d /etc/sv ]; then sv -a status 2>/dev/null | grep -v '^run:' || echo 'todos os serviços rodando'; else echo 'init não reconhecido'; fi ;; *) systemctl --failed --no-pager 2>/dev/null ;; esac" >> "$OUT"
+run "Pacotes instalados (contagem)" "if command -v dpkg >/dev/null; then dpkg -l | grep -c '^ii'; elif command -v xbps-query >/dev/null; then xbps-query -l | grep -c '^ii'; elif command -v pacman >/dev/null; then pacman -Q | wc -l; else echo 'n/d'; fi" >> "$OUT"
 
 # ---------------------------------------------------------------- 4. vídeo
 
@@ -148,7 +179,7 @@ run "Pacotes instalados (contagem)" "dpkg -l 2>/dev/null | grep -c '^ii' || echo
     echo "## 4. Vídeo e tela"
 } >> "$OUT"
 
-run "Resolução / saídas (xrandr)" "xrandr 2>/dev/null || echo 'xrandr indisponível (sem X ou sem pacote)'" >> "$OUT"
+run "Resolução / saídas (xrandr)" "if command -v xrandr >/dev/null 2>&1 && xrandr >/dev/null 2>&1; then xrandr; else echo 'xrandr indisponível (sessão gráfica não está rodando)'; echo; echo '--- modos suportados pelo kernel (DRM) ---'; for m in /sys/class/drm/card*/modes; do [ -s \"\$m\" ] && { echo \"\$m:\"; head -5 \"\$m\"; }; done; echo '--- status das saídas ---'; for s in /sys/class/drm/card*-\*/status; do [ -s \"\$s\" ] && printf '%s: %s\n' \"\$s\" \"\$(cat \"\$s\")\"; done; fi" >> "$OUT"
 run "Driver em uso" "lspci -nnk 2>/dev/null | grep -A3 -i 'vga\|display' || echo 'lspci indisponível'" >> "$OUT"
 run "Módulos de vídeo carregados" "lsmod 2>/dev/null | grep -E 'radeon|amdgpu|i915|drm' || echo 'nenhum'" >> "$OUT"
 run "Aceleração GL (se houver)" "glxinfo -B 2>/dev/null | head -20 || echo 'glxinfo indisponível'" >> "$OUT"
@@ -186,7 +217,7 @@ run "Endereços IP" "ip -4 addr show 2>/dev/null | grep -E 'inet |^[0-9]' || ifc
 run "Rota padrão" "ip route 2>/dev/null | head -5" >> "$OUT"
 run "Wi-Fi / firmware" "lspci -nnk 2>/dev/null | grep -A3 -i 'network\|wireless' || echo 'n/d'" >> "$OUT"
 run "Conectividade (ping curto)" "ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo 'internet OK' || echo 'sem internet'" >> "$OUT"
-run "SSH ativo?" "systemctl is-active ssh 2>/dev/null || systemctl is-active sshd 2>/dev/null || echo 'não'" >> "$OUT"
+run "SSH ativo? (porta 22)" "ss -ltn 2>/dev/null | grep -q ':22 ' && echo 'sshd escutando na porta 22' || echo 'porta 22 fechada'" >> "$OUT"
 
 # ---------------------------------------------------------------- 8. ferramentas
 
@@ -280,6 +311,24 @@ Guardar em `docs/fotos/` com estes nomes:
 - [ ] Versões de `adb`/`scrcpy` batem com `build/VERSIONS.lock`
 - [ ] Nenhum "n/d" sem justificativa
 FIM
+
+# ---------------------------------------------------------------- anonimização
+
+# Mascara o que não deve ir para um repositório público: IPs privados e MACs.
+# Use com --mascarar (ou MASCARAR=1) quando o documento for publicado.
+if [ "$MASCARAR" = "1" ]; then
+    sed -i -E \
+        -e 's/(^|[^0-9.])192\.168\.[0-9]{1,3}\.[0-9]{1,3}/\1192.168.x.x/g' \
+        -e 's/(^|[^0-9.])10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/\110.x.x.x/g' \
+        -e 's/(^|[^0-9.])172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}/\1172.16-31.x.x/g' \
+        -e 's/([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}/xx:xx:xx:xx:xx:xx/g' \
+        "$OUT"
+    {
+        echo
+        echo "> IPs privados e endereços MAC foram mascarados (\`--mascarar\`) antes da publicação."
+    } >> "$OUT"
+    printf 'IPs privados e MACs mascarados em %s.\n' "$OUT"
+fi
 
 # Se foi rodado com "sudo bash ...", devolve o arquivo para o usuário — senão ele fica
 # com dono root e o git (rodando como usuário) não consegue nem ler.
